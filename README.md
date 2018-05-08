@@ -1,0 +1,2 @@
+# wizard
+the wizard monad
