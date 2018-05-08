@@ -3,8 +3,13 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 import Control.Applicative (liftA2)
-import System.Directory (listDirectory, removeFile)
+#if !(MIN_VERSION_base(4,11,0))
+import Data.Semigroup (Semigroup(..))
+#endif
+import Data.Monoid ((<>))
 
+-- | A 'Wizard' Monoid, based on ideas expressed by Gabriel Gonzalez
+-- at http://www.haskellforall.com/2018/02/the-wizard-monoid.html.
 newtype Wizard m a = Wizard { wand :: m (m a) }
 
 instance (Functor m) => Functor (Wizard m) where
@@ -24,41 +29,33 @@ instance (Monad m) => Monad (Wizard m) where
     id =<< (fmap (wand . f) $ (wand k >>= id))
 
 instance (Monad m, Semigroup a) => Semigroup (Wizard m a) where
+  (<>) :: Wizard m a -> Wizard m a -> Wizard m a 
   (<>) = liftA2 (<>)
 
 instance (Monad m, Monoid a) => Monoid (Wizard m a) where
+  mempty :: Wizard m a 
   mempty = pure mempty
 #if !(MIN_VERSION_base(4,11,0))
+  mappend :: Wizard m a -> Wizard m a -> Wizard m a 
   mappend = liftA2 mappend
 #endif
 
+-- | Map over a Wizard.
+mapWizard :: Functor m => (a -> b) -> Wizard m a -> Wizard m b
+mapWizard f = Wizard . fmap (fmap f) . wand
+
+-- | Get the input out of the Wizard.
 runWizard :: (Monad m) => Wizard m a -> m a
 runWizard w = (wand w) >>= id
 
+-- | Lift an input into a Wizard.
 leviosa :: (Monad m) => m a -> Wizard m a
 leviosa = Wizard . pure
 
-runWizards
+-- | Run an action over a collection of inputs.
+foldWizard
   :: forall m t a b. (Monad m, Foldable t, Monoid a, Monoid b)
   => (a -> Wizard m b)
   -> t a
   -> m b
-runWizards f t = runWizard (foldMap f t)
-
-type WizardIO a = Wizard IO a
-
-prompt :: FilePath -> WizardIO ()
-prompt file = do
-  leviosa $ putStrLn ("Would you like to delete " ++ file ++ "?")
-  response <- leviosa getLine
-  case response of
-    "kdskfjlkdjsjfiehueijireijrdjflslmnvlns" -> leviosa $ do
-      putStrLn ("Removing " ++ file)
-      removeFile file
-    _ -> pure ()
-  pure ()
-
-main :: IO ()
-main = do
-  files <- listDirectory "."
-  runWizards prompt files
+foldWizard f t = runWizard (foldMap f t)
