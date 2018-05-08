@@ -4,117 +4,158 @@
 {-# LANGUAGE InstanceSigs        #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving  #-}
+{-# LANGUAGE TypeOperators       #-}
 
 import Control.Applicative (liftA2, Alternative((<|>)))
 import Control.Monad (MonadPlus(mzero))
 import Control.Monad.Fail (MonadFail(fail))
 import Control.Monad.Fix (MonadFix(mfix))
-import Control.Monad.IO.Class
-import Control.Monad.Trans.Class
+import Control.Monad.IO.Class (MonadIO(liftIO))
+import Control.Monad.ST (ST)
+import Control.Monad.Trans.Class (MonadTrans(lift))
 import Data.Coerce (coerce)
+import Data.Complex (Complex)
 import Data.Data (Data, Typeable)
 import Data.Foldable (Foldable(foldMap))
 import Data.Function (fix)
-import Data.Monoid ((<>))
-#if !(MIN_VERSION_base(4,11,0))
-import Data.Semigroup (Semigroup(..))
-#endif
+import Data.Functor.Identity (Identity)
+import Data.List.NonEmpty (NonEmpty)
+import Data.Monoid (Monoid(mempty,mappend), Product, Sum, Dual, Last, First, Alt)
+import Data.Ord (Down)
+import Data.Proxy (Proxy)
+import Data.Semigroup (Semigroup((<>)), Option, Max, Min)
 import Data.Traversable (Traversable(traverse))
-import GHC.Generics (Generic, Generic1)
+import GHC.Conc (STM)
+import GHC.Generics (Generic, Generic1, U1, Par1, Rec1, M1, (:*:))
+import Text.ParserCombinators.ReadP (ReadP)
+import Text.ParserCombinators.ReadPrec (ReadPrec)
 
+import qualified Data.Functor.Product as Product (Product)
 import qualified Control.Applicative as Alternative (empty)
 
-infixr 9 `Wizard`
+infixr 9 `WizardT`
 
 -- | A 'Wizard' Monoid, based on ideas expressed by Gabriel Gonzalez
 -- at http://www.haskellforall.com/2018/02/the-wizard-monoid.html.
 --
 -- One can view this as 'Data.Functor.Compose.Compose', specialised
 -- to a single functor.
-newtype Wizard m a = Wizard { wand :: m (m a) }
+newtype WizardT m a = WizardT { wand :: m (m a) }
   deriving (Generic, Generic1, Typeable)
 
-empty :: (Applicative f, Monoid a) => Wizard f a
+empty :: (Applicative f, Monoid a) => WizardT f a
 empty = pure mempty
 
-singleton :: (Applicative f) => a -> Wizard f a
+singleton :: (Applicative f) => a -> WizardT f a
 singleton = pure 
 
-instance (Functor f) => Functor (Wizard f) where
-  fmap :: forall a b f. Functor f => (a -> b) -> Wizard f a -> Wizard f b 
-  fmap f = Wizard . fmap (fmap f) . wand
+instance (Functor f) => Functor (WizardT f) where
+  fmap :: forall a b f. Functor f => (a -> b) -> WizardT f a -> WizardT f b 
+  fmap f = WizardT . fmap (fmap f) . wand
 
-instance (Applicative f) => Applicative (Wizard f) where
-  pure :: forall a b f. Applicative f => a -> Wizard f a 
-  pure = Wizard . pure . pure
-  (<*>) :: forall a b f. Applicative f => Wizard f (a -> b) -> Wizard f a -> Wizard f b 
-  Wizard f <*> Wizard x = Wizard (liftA2 (<*>) f x)
-  liftA2 f (Wizard x) (Wizard y) =
-    Wizard (liftA2 (liftA2 f) x y)
+instance (Applicative f) => Applicative (WizardT f) where
+  pure :: forall a b f. Applicative f => a -> WizardT f a 
+  pure = WizardT . pure . pure
+  (<*>) :: forall a b f. Applicative f => WizardT f (a -> b) -> WizardT f a -> WizardT f b 
+  WizardT f <*> WizardT x = WizardT (liftA2 (<*>) f x)
+  liftA2 f (WizardT x) (WizardT y) =
+    WizardT (liftA2 (liftA2 f) x y)
 
-instance (Monad m) => Monad (Wizard m) where
-  (>>=) :: forall a b m. Monad m => Wizard m a -> (a -> Wizard m b) -> Wizard m b
+instance (Monad m) => Monad (WizardT m) where
+  (>>=) :: forall a b m. Monad m => WizardT m a -> (a -> WizardT m b) -> WizardT m b
   (>>=) = flip summon . essence
 
-instance (Applicative f, Semigroup a) => Semigroup (Wizard f a) where
-  (<>) :: Wizard f a -> Wizard f a -> Wizard f a 
+instance (Applicative f, Semigroup a) => Semigroup (WizardT f a) where
+  (<>) :: WizardT f a -> WizardT f a -> WizardT f a 
   (<>) = liftA2 (<>)
 
-instance (Applicative f, Monoid a) => Monoid (Wizard f a) where
-  mempty :: Wizard f a 
+instance (Applicative f, Monoid a) => Monoid (WizardT f a) where
+  mempty :: WizardT f a 
   mempty = pure mempty
 #if !(MIN_VERSION_base(4,11,0))
-  mappend :: Wizard f a -> Wizard f a -> Wizard f a 
+  mappend :: WizardT f a -> WizardT f a -> WizardT f a 
   mappend = liftA2 mappend
 #endif
 
-instance (Foldable f) => Foldable (Wizard f) where
-  foldMap f (Wizard t) = foldMap (foldMap f) t
+instance (Foldable f) => Foldable (WizardT f) where
+  foldMap f (WizardT t) = foldMap (foldMap f) t
 
-instance (Traversable t) => Traversable (Wizard t) where
-  traverse f (Wizard t) = Wizard <$> traverse (traverse f) t
+instance (Traversable t) => Traversable (WizardT t) where
+  traverse f (WizardT t) = WizardT <$> traverse (traverse f) t
 
-instance (Alternative f) => Alternative (Wizard f) where
-  empty = Wizard Alternative.empty
+instance (Alternative f) => Alternative (WizardT f) where
+  empty = WizardT Alternative.empty
   (<|>) = coerce ((<|>) :: f (f a) -> f (f a) -> f (f a))
-    :: forall a . Wizard f a -> Wizard f a -> Wizard f a
+    :: forall a . WizardT f a -> WizardT f a -> WizardT f a
 
-instance (Alternative m, Monad m) => MonadPlus (Wizard m) where
+instance (Alternative m, Monad m) => MonadPlus (WizardT m) where
 
-instance (Alternative m, Monad m) => MonadFail (Wizard m) where
+instance (Alternative m, Monad m) => MonadFail (WizardT m) where
   fail _ = mzero
 
-instance (MonadFix m) => MonadFix (Wizard m) where
+instance (MonadFix m) => MonadFix (WizardT m) where
   mfix = mfix pure
 
--- | Map over a Wizard.
-mapWizard :: Functor f => (a -> b) -> Wizard f a -> Wizard f b
-mapWizard f = Wizard . fmap (fmap f) . wand
+-- | Map over a WizardT.
+mapWizardT :: Functor f => (a -> b) -> WizardT f a -> WizardT f b
+mapWizardT f = WizardT . fmap (fmap f) . wand
 
--- | Get the input (essence) out of the Wizard.
-essence :: (Monad m) => Wizard m a -> m a
+-- | Get the input (essence) out of the WizardT.
+essence :: (Monad m) => WizardT m a -> m a
 essence w = (wand w) >>= id
 
--- | Lift an input into a Wizard.
-leviosa :: (Monad m) => m a -> Wizard m a
-leviosa = Wizard . pure
+-- | Lift an input into a WizardT.
+leviosa :: (Monad m) => m a -> WizardT m a
+leviosa = WizardT . pure
 
--- | Summon a Wizard out of a monad.
+-- | Summon a WizardT out of a monad.
 --
 -- @ '(>>=)' = 'flip' 'summon' '.' 'essence' @
-summon :: Monad m => (a -> Wizard m b) -> m a -> Wizard m b
-summon f = Wizard . (wand . f =<<)
+summon :: Monad m => (a -> WizardT m b) -> m a -> WizardT m b
+summon f = WizardT . (wand . f =<<)
 
 -- | Run an action over a collection of inputs.
-foldWizard
+foldWizardT
   :: forall m t a b. (Monad m, Foldable t, Monoid a, Monoid b)
-  => (a -> Wizard m b)
+  => (a -> WizardT m b)
   -> t a
   -> m b
-foldWizard f t = essence (foldMap f t)
+foldWizardT f t = essence (foldMap f t)
 
-instance MonadTrans Wizard where
-  lift = Wizard . fmap pure
+type Wizard             a   = WizardT Identity a
+type WizardEndo         a   = WizardT ((->) a) a
+type WizardF            a b = WizardT ((->) b) a
+type WizardIO           a   = WizardT IO a
+type WizardList         a   = WizardT [] a
+type WizardMaybe        a   = WizardT Maybe a
+type WizardEither       a e = WizardT (Either e) a
+type WizardTuple        a   = WizardT ((,) a) a
+type WizardU1           a   = WizardT U1 a
+type WizardPar1         a   = WizardT Par1 a
+type WizardRec1       f a   = WizardT (Rec1 f) a
+type WizardM1     i c f a   = WizardT (M1 i c f) a
+type WizardGProd    f g a   = WizardT (f :*: g) a
+type WizardNonEmpty     a   = WizardT NonEmpty a
+type WizardSTM          a   = WizardT STM a
+type WizardReadP        a   = WizardT ReadP a
+type WizardReadPrec     a   = WizardT ReadPrec a
+type WizardDown         a   = WizardT Down a
+type WizardProduct      a   = WizardT Product a
+type WizardSum          a   = WizardT Sum a
+type WizardDual         a   = WizardT Dual a
+type WizardLast         a   = WizardT Last a
+type WizardFirst        a   = WizardT First a
+type WizardOption       a   = WizardT Option a
+type WizardMax          a   = WizardT Max a
+type WizardMin          a   = WizardT Min a
+type WizardComplex      a   = WizardT Complex a
+type WizardST         s a   = WizardT (ST s) a
+type WizardProxy        a   = WizardT Proxy a
+type WizardAlt        f a   = WizardT (Alt f) a
+type WizardProductF f g a   = WizardT (Product.Product f g) a
 
-instance (MonadIO m) => MonadIO (Wizard m) where
+instance MonadTrans WizardT where
+  lift = WizardT . fmap pure
+
+instance (MonadIO m) => MonadIO (WizardT m) where
   liftIO = lift . liftIO
