@@ -6,8 +6,50 @@
 {-# LANGUAGE StandaloneDeriving  #-}
 {-# LANGUAGE TypeOperators       #-}
 
+module Wizard
+  ( WizardT(..)
+  , empty
+  , singleton
+  , mapWizardT
+  , essence
+  , leviosa
+  , summon
+  , foldWizardT
+  
+    -- * Monomophised Wizards
+  , Wizard
+  , WizardAlt
+  , WizardComplex
+  , WizardDown
+  , WizardDual
+  , WizardEither
+  , WizardEndo
+  , WizardF
+  , WizardFirst
+  , WizardGProd
+  , WizardIO
+  , WizardLast
+  , WizardList
+  , WizardMax
+  , WizardMaybe
+  , WizardMin
+  , WizardNonEmpty
+  , WizardOption
+  , WizardPar1
+  , WizardProduct
+  , WizardProxy
+  , WizardReadP
+  , WizardReadPrec
+  , WizardRec1
+  , WizardST
+  , WizardSTM
+  , WizardSum
+  , WizardTuple
+  , WizardU1
+  ) where
+
 import Control.Applicative (liftA2, Alternative((<|>)))
-import Control.Monad (MonadPlus(mzero))
+import Control.Monad (MonadPlus(mzero), join)
 import Control.Monad.Fail (MonadFail(fail))
 import Control.Monad.Fix (MonadFix(mfix))
 import Control.Monad.IO.Class (MonadIO(liftIO))
@@ -42,12 +84,6 @@ infixr 9 `WizardT`
 -- to a single functor.
 newtype WizardT m a = WizardT { wand :: m (m a) }
   deriving (Generic, Generic1, Typeable)
-
-empty :: (Applicative f, Monoid a) => WizardT f a
-empty = pure mempty
-
-singleton :: (Applicative f) => a -> WizardT f a
-singleton = pure 
 
 instance (Functor f) => Functor (WizardT f) where
   fmap :: forall a b f. Functor f => (a -> b) -> WizardT f a -> WizardT f b 
@@ -94,25 +130,43 @@ instance (Alternative m, Monad m) => MonadFail (WizardT m) where
   fail _ = mzero
 
 instance (MonadFix m) => MonadFix (WizardT m) where
-  mfix = mfix pure
+  mfix f = WizardT (pure (mfix (essence . f)))
+
+instance MonadTrans WizardT where
+  lift = WizardT . fmap pure
+
+instance (MonadIO m) => MonadIO (WizardT m) where
+  liftIO = lift . liftIO
+
+empty :: (Applicative f, Monoid a) => WizardT f a
+empty = pure mempty
+{-# INLINE empty #-}
+
+singleton :: (Applicative f) => a -> WizardT f a
+singleton = pure 
+{-# INLINE singleton #-}
 
 -- | Map over a WizardT.
 mapWizardT :: Functor f => (a -> b) -> WizardT f a -> WizardT f b
 mapWizardT f = WizardT . fmap (fmap f) . wand
+{-# INLINE mapWizardT #-}
 
 -- | Get the input (essence) out of the WizardT.
 essence :: (Monad m) => WizardT m a -> m a
 essence w = (wand w) >>= id
+{-# INLINE essence #-}
 
 -- | Lift an input into a WizardT.
 leviosa :: (Monad m) => m a -> WizardT m a
 leviosa = WizardT . pure
+{-# INLINE leviosa #-}
 
 -- | Summon a WizardT out of a monad.
 --
 -- @ '(>>=)' = 'flip' 'summon' '.' 'essence' @
 summon :: Monad m => (a -> WizardT m b) -> m a -> WizardT m b
 summon f = WizardT . (wand . f =<<)
+{-# INLINE summon #-}
 
 -- | Run an action over a collection of inputs.
 foldWizardT
@@ -121,6 +175,7 @@ foldWizardT
   -> t a
   -> m b
 foldWizardT f t = essence (foldMap f t)
+{-# INLINE foldWizardT #-}
 
 type Wizard             a   = WizardT Identity a
 type WizardEndo         a   = WizardT ((->) a) a
@@ -152,10 +207,3 @@ type WizardComplex      a   = WizardT Complex a
 type WizardST         s a   = WizardT (ST s) a
 type WizardProxy        a   = WizardT Proxy a
 type WizardAlt        f a   = WizardT (Alt f) a
-type WizardProductF f g a   = WizardT (Product.Product f g) a
-
-instance MonadTrans WizardT where
-  lift = WizardT . fmap pure
-
-instance (MonadIO m) => MonadIO (WizardT m) where
-  liftIO = lift . liftIO
