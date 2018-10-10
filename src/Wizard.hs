@@ -200,7 +200,7 @@ leviosa = WizardT . pure
 -- | Summon a Wizard out of a monad using
 --   a conjuring spell.
 --
---   @ '(>>=)' = 'flip' 'summon' '.' 'essence' @
+--   @ ('>>=') = 'flip' 'summon' '.' 'essence' @
 summon :: Monad m => (a -> WizardT m b) -> m a -> WizardT m b
 summon f = WizardT . (wand . f =<<)
 {-# INLINE summon #-}
