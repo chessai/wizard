@@ -26,38 +26,6 @@ module Wizard
   , singleton
   , mapWizard
   , foldWizard
-    
-    -- * Monomophised Wizards
-  , Wizard
-  , WizardAlt
-  , WizardComplex
-  , WizardDown
-  , WizardDual
-  , WizardEither
-  , WizardEndo
-  , WizardF
-  , WizardFirst
-  , WizardGProd
-  , WizardIO
-  , WizardLast
-  , WizardList
-  , WizardM1
-  , WizardMax
-  , WizardMaybe
-  , WizardMin
-  , WizardNonEmpty
-  , WizardOption
-  , WizardPar1
-  , WizardProduct
-  , WizardProxy
-  , WizardReadP
-  , WizardReadPrec
-  , WizardRec1
-  , WizardST
-  , WizardSTM
-  , WizardSum
-  , WizardTuple
-  , WizardU1
   ) where
 
 import Control.Applicative (liftA2, Alternative((<|>)))
@@ -65,23 +33,14 @@ import Control.Monad (MonadPlus(mzero))
 import Control.Monad.Fail (MonadFail(fail))
 import Control.Monad.Fix (MonadFix(mfix))
 import Control.Monad.IO.Class (MonadIO(liftIO))
-import Control.Monad.ST (ST)
 import Control.Monad.Trans.Class (MonadTrans(lift))
 import Data.Coerce (coerce)
-import Data.Complex (Complex)
 import Data.Data (Typeable)
 import Data.Foldable (Foldable(foldMap))
-import Data.Functor.Identity (Identity)
-import Data.List.NonEmpty (NonEmpty)
-import Data.Monoid (Monoid(mempty,mappend), Product, Sum, Dual, Last, First, Alt)
-import Data.Ord (Down)
-import Data.Proxy (Proxy)
-import Data.Semigroup (Semigroup((<>)), Option, Max, Min)
+import Data.Monoid (Monoid(..))
+import Data.Semigroup (Semigroup((<>)))
 import Data.Traversable (Traversable(traverse))
-import GHC.Conc (STM)
-import GHC.Generics (Generic, Generic1, U1, Par1, Rec1, M1, (:*:))
-import Text.ParserCombinators.ReadP (ReadP)
-import Text.ParserCombinators.ReadPrec (ReadPrec)
+import GHC.Generics (Generic, Generic1)
 
 import qualified Control.Applicative as Alternative (empty)
 
@@ -226,34 +185,3 @@ foldWizard
   -> m b
 foldWizard f t = essence (foldMap f t)
 {-# INLINE foldWizard #-}
-
-type Wizard             a   = WizardT Identity a
-type WizardEndo         a   = WizardT ((->) a) a
-type WizardF            a b = WizardT ((->) b) a
-type WizardIO           a   = WizardT IO a
-type WizardList         a   = WizardT [] a
-type WizardMaybe        a   = WizardT Maybe a
-type WizardEither       a e = WizardT (Either e) a
-type WizardTuple        a   = WizardT ((,) a) a
-type WizardU1           a   = WizardT U1 a
-type WizardPar1         a   = WizardT Par1 a
-type WizardRec1       f a   = WizardT (Rec1 f) a
-type WizardM1     i c f a   = WizardT (M1 i c f) a
-type WizardGProd    f g a   = WizardT (f :*: g) a
-type WizardNonEmpty     a   = WizardT NonEmpty a
-type WizardSTM          a   = WizardT STM a
-type WizardReadP        a   = WizardT ReadP a
-type WizardReadPrec     a   = WizardT ReadPrec a
-type WizardDown         a   = WizardT Down a
-type WizardProduct      a   = WizardT Product a
-type WizardSum          a   = WizardT Sum a
-type WizardDual         a   = WizardT Dual a
-type WizardLast         a   = WizardT Last a
-type WizardFirst        a   = WizardT First a
-type WizardOption       a   = WizardT Option a
-type WizardMax          a   = WizardT Max a
-type WizardMin          a   = WizardT Min a
-type WizardComplex      a   = WizardT Complex a
-type WizardST         s a   = WizardT (ST s) a
-type WizardProxy        a   = WizardT Proxy a
-type WizardAlt        f a   = WizardT (Alt f) a
